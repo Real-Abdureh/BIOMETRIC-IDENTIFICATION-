@@ -7,18 +7,19 @@
 
       <!-- Face Verification -->
       <div class="mb-4 text-center">
-        <label class="form-label fw-semibold">Face Verification</label>
         <div class="d-flex flex-column align-items-center">
-          <video id="video" autoplay class="border rounded shadow-sm mb-3" width="300" height="220"></video>
-          
-          <!-- Camera fail message -->
+          <!-- Video Preview -->
+          <video id="video" autoplay class="border rounded shadow-sm mb-3" width="320" height="240"></video>
+
+          <!-- Camera Fail Message -->
           <p id="cameraFailMsg" class="text-danger fw-semibold d-none">
             ❌ Camera not available. Please upload an image instead.
           </p>
-          
+
+          <!-- Canvas (hidden) -->
           <canvas id="canvas" class="d-none"></canvas>
 
-          <!-- Hidden by default, shown if camera fails -->
+          <!-- Upload Fallback -->
           <div id="uploadWrapper" class="w-75 mt-2 d-none">
             <input 
               type="file" 
@@ -31,13 +32,10 @@
         </div>
       </div>
 
-      <!-- Action Buttons -->
-      <div class="d-flex justify-content-center gap-3">
-        <button id="verifyFaceBtn" type="button" class="btn btn-primary">
-          📷 Verify Face
-        </button>
-        <button id="verifyFingerprintBtn" type="button" class="btn btn-dark">
-          ✋ Verify Fingerprint
+      <!-- Verify Button -->
+      <div class="d-flex justify-content-center">
+        <button id="verifyBtn" type="button" class="btn btn-primary btn-lg">
+          🔍 Verify
         </button>
       </div>
 
@@ -47,25 +45,27 @@
   </div>
 </div>
 
-
-
-
 <script>
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const messageBox = document.getElementById("messageBox");
 const cameraFailMsg = document.getElementById("cameraFailMsg");
 const faceInput = document.getElementById("faceInput");
+const uploadWrapper = document.getElementById("uploadWrapper");
 
-// Camera
+// Camera setup
 async function initCamera() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return cameraFail();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        cameraFail();
+        return;
+    }
+
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         video.srcObject = stream;
         video.style.display = "block";
-        cameraFailMsg.style.display = "none";
-        faceInput.style.display = "none";
+        cameraFailMsg.classList.add("d-none");
+        uploadWrapper.classList.add("d-none");
     } catch (err) {
         cameraFail();
         console.warn("Camera init failed:", err);
@@ -74,15 +74,17 @@ async function initCamera() {
 
 function cameraFail() {
     video.style.display = "none";
-    cameraFailMsg.style.display = "block";
-    faceInput.style.display = "block";
+    cameraFailMsg.classList.remove("d-none");
+    uploadWrapper.classList.remove("d-none");
 }
 
+// Show messages
 function showMessage(text, color) {
     messageBox.textContent = text;
     messageBox.style.color = color;
 }
 
+// Safe fetch
 async function safeFetch(url, options) {
     const res = await fetch(url, options);
     const contentType = res.headers.get("content-type");
@@ -94,62 +96,42 @@ async function safeFetch(url, options) {
     }
 }
 
-// Verify Face
-document.getElementById("verifyFaceBtn").onclick = async () => {
+// Verify button
+document.getElementById("verifyBtn").onclick = async () => {
     let formData = new FormData();
+
     if (video.style.display !== "none") {
+        // Use video frame
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         canvas.getContext("2d").drawImage(video, 0, 0);
         const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
         formData.append("face_image", blob, "verify.png");
     } else if (faceInput.files.length) {
+        // Use uploaded file
         formData.append("face_image", faceInput.files[0]);
     } else {
         return showMessage("❌ Camera not available. Please upload an image.", "red");
     }
 
     try {
-        const result = await safeFetch("/verify-face/", { method: "POST", body: formData });
-        showMessage(result.ok ? `✅ Verified (confidence ${result.confidence})` : "❌ " + result.error, result.ok ? "green" : "red");
+        const result = await safeFetch("", {
+            method: "POST",
+            headers: { "X-CSRFToken": "{{ csrf_token }}" },
+            body: formData
+        });
+
+        if (result.ok) {
+            showMessage(`✅ Verified (confidence ${result.confidence})`, "green");
+        } else {
+            showMessage("❌ " + result.error, "red");
+        }
     } catch (err) {
         showMessage("❌ Request failed: " + err, "red");
     }
 };
 
-// Verify Fingerprint
-document.getElementById("verifyFingerprintBtn").onclick = async () => {
-    if (!window.PublicKeyCredential) return showMessage("❌ WebAuthn not supported", "red");
-
-    try {
-        // Get challenge from server
-        const optionsResponse = await safeFetch("/fingerprint/start-verify/", { method: "GET" });
-        const options = optionsResponse.options;
-
-        // Convert base64 to Uint8Array
-        options.challenge = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0));
-        for (let cred of options.allowCredentials) {
-            cred.id = Uint8Array.from(atob(cred.id), c => c.charCodeAt(0));
-        }
-
-        const assertion = await navigator.credentials.get({ publicKey: options });
-
-        const formData = new FormData();
-        formData.append("assertion", JSON.stringify(assertion));
-
-        const result = await safeFetch("/fingerprint/complete-verify/", { method: "POST", body: formData });
-        showMessage(result.ok ? "✅ Fingerprint verified!" : "❌ " + result.error, result.ok ? "green" : "red");
-    } catch (err) {
-        showMessage("❌ Fingerprint verification failed: " + err, "red");
-    }
-};
-
+// Initialize
 initCamera();
-
-function cameraFail() {
-    video.style.display = "none";
-    cameraFailMsg.classList.remove("d-none");
-    uploadWrapper.classList.remove("d-none");
-}
 </script>
 {% endblock %}
