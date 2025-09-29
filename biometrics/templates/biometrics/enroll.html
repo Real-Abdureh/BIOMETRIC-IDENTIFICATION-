@@ -1,0 +1,163 @@
+{% extends 'accounts/base.html' %}
+{% block content %}
+<div class="container mt-5">
+  <div class="card shadow-lg rounded-3">
+    <div class="card-body p-4">
+      <h2 class="mb-4 text-center text-primary fw-bold">Enroll Face / Fingerprint</h2>
+
+      <!-- Face Enrollment -->
+      <div class="mb-4">
+        <label class="form-label fw-semibold">Face Enrollment</label>
+        <div class="d-flex flex-column align-items-center">
+          <video id="video" autoplay class="border rounded shadow-sm mb-3" width="300" height="220"></video>
+          <p id="cameraFailMsg" class="text-danger fw-semibold d-none">
+            ❌ Camera not available. Please upload an image instead.
+          </p>
+          <div class="d-flex gap-2">
+            <button id="snap" type="button" class="btn btn-primary">
+              📷 Capture & Enroll
+            </button>
+            <input type="file" id="faceInput" accept="image/*" capture="user" class="form-control" />
+            <button id="uploadBtn" type="button" class="btn btn-success">
+              ⬆ Upload & Enroll
+            </button>
+          </div>
+        </div>
+        <canvas id="canvas" class="d-none"></canvas>
+      </div>
+
+      <!-- Fingerprint Enrollment -->
+      <div class="mt-4 text-center">
+        <label class="form-label fw-semibold">Fingerprint Enrollment</label>
+        <button id="fingerprintEnrollBtn" type="button" class="btn btn-dark mt-2">
+          ✋ Enroll Fingerprint
+        </button>
+      </div>
+
+      <!-- Message Box -->
+      <div id="messageBox" class="mt-4 text-center fw-bold"></div>
+    </div>
+  </div>
+</div>
+
+
+
+
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const messageBox = document.getElementById("messageBox");
+const cameraFailMsg = document.getElementById("cameraFailMsg");
+const faceInput = document.getElementById("faceInput");
+
+// Camera setup
+async function initCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        cameraFail();
+        return;
+    }
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        video.style.display = "block";
+        cameraFailMsg.style.display = "none";
+    } catch (err) {
+        cameraFail();
+        console.warn("Camera init failed:", err);
+    }
+}
+
+function cameraFail() {
+    video.style.display = "none";
+    cameraFailMsg.style.display = "block";
+}
+
+// Show messages
+function showMessage(text, color) {
+    messageBox.textContent = text;
+    messageBox.style.color = color;
+}
+
+// Safe fetch helper
+async function safeFetch(url, options) {
+    const res = await fetch(url, options);
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.indexOf("application/json") !== -1) {
+        return await res.json();
+    } else {
+        const text = await res.text();
+        throw new Error("Server did not return JSON:\n" + text);
+    }
+}
+
+// Face Upload
+document.getElementById("uploadBtn").onclick = async () => {
+    if (!faceInput.files.length) return showMessage("❌ Please select an image", "red");
+    const formData = new FormData();
+    formData.append("face_image", faceInput.files[0]);
+    try {
+        const result = await safeFetch("", {
+            method: "POST",
+            headers: { "X-CSRFToken": "{{ csrf_token }}" },
+            body: formData
+        });
+        showMessage(result.ok ? "✅ " + result.message : "❌ " + result.error, result.ok ? "green" : "red");
+    } catch (err) {
+        showMessage("❌ Upload failed: " + err, "red");
+    }
+};
+
+// Face Capture
+document.getElementById("snap").onclick = async () => {
+    if (video.style.display === "none") return showMessage("❌ Camera not available.", "red");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+    const formData = new FormData();
+    formData.append("face_image", blob, "capture.png");
+    try {
+        const result = await safeFetch("", {
+            method: "POST",
+            headers: { "X-CSRFToken": "{{ csrf_token }}" },
+            body: formData
+        });
+        showMessage(result.ok ? "✅ " + result.message : "❌ " + result.error, result.ok ? "green" : "red");
+    } catch (err) {
+        showMessage("❌ Capture failed: " + err, "red");
+    }
+};
+
+// Fingerprint Enrollment
+document.getElementById("fingerprintEnrollBtn").onclick = async () => {
+    if (!window.PublicKeyCredential) {
+        return showMessage("❌ WebAuthn not supported on this device", "red");
+    }
+
+    try {
+        // Request challenge from server
+        const optionsResponse = await safeFetch("/fingerprint/start-enroll/", { method: "GET" });
+        const options = optionsResponse.options;
+
+        // Convert options from base64 if needed
+        options.challenge = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0));
+        options.user.id = Uint8Array.from(atob(options.user.id), c => c.charCodeAt(0));
+
+        const credential = await navigator.credentials.create({ publicKey: options });
+
+        // Send credential to server to complete enrollment
+        const formData = new FormData();
+        formData.append("credential", JSON.stringify(credential));
+        const result = await safeFetch("/fingerprint/complete-enroll/", { method: "POST", body: formData });
+
+        showMessage(result.ok ? "✅ Fingerprint enrolled!" : "❌ " + result.error, result.ok ? "green" : "red");
+    } catch (err) {
+        showMessage("❌ Fingerprint enrollment failed: " + err, "red");
+    }
+};
+
+// Initialize camera
+initCamera();
+</script>
+{% endblock %}

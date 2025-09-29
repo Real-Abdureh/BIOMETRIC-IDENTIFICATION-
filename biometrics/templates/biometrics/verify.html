@@ -1,0 +1,155 @@
+{% extends 'accounts/base.html' %}
+{% block content %}
+<div class="container mt-5">
+  <div class="card shadow-lg rounded-3">
+    <div class="card-body p-4">
+      <h2 class="mb-4 text-center text-primary fw-bold">Verify User</h2>
+
+      <!-- Face Verification -->
+      <div class="mb-4 text-center">
+        <label class="form-label fw-semibold">Face Verification</label>
+        <div class="d-flex flex-column align-items-center">
+          <video id="video" autoplay class="border rounded shadow-sm mb-3" width="300" height="220"></video>
+          
+          <!-- Camera fail message -->
+          <p id="cameraFailMsg" class="text-danger fw-semibold d-none">
+            ❌ Camera not available. Please upload an image instead.
+          </p>
+          
+          <canvas id="canvas" class="d-none"></canvas>
+
+          <!-- Hidden by default, shown if camera fails -->
+          <div id="uploadWrapper" class="w-75 mt-2 d-none">
+            <input 
+              type="file" 
+              id="faceInput" 
+              accept="image/*" 
+              capture="user" 
+              class="form-control"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="d-flex justify-content-center gap-3">
+        <button id="verifyFaceBtn" type="button" class="btn btn-primary">
+          📷 Verify Face
+        </button>
+        <button id="verifyFingerprintBtn" type="button" class="btn btn-dark">
+          ✋ Verify Fingerprint
+        </button>
+      </div>
+
+      <!-- Message Box -->
+      <div id="messageBox" class="mt-4 text-center fw-bold"></div>
+    </div>
+  </div>
+</div>
+
+
+
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const messageBox = document.getElementById("messageBox");
+const cameraFailMsg = document.getElementById("cameraFailMsg");
+const faceInput = document.getElementById("faceInput");
+
+// Camera
+async function initCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return cameraFail();
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        video.style.display = "block";
+        cameraFailMsg.style.display = "none";
+        faceInput.style.display = "none";
+    } catch (err) {
+        cameraFail();
+        console.warn("Camera init failed:", err);
+    }
+}
+
+function cameraFail() {
+    video.style.display = "none";
+    cameraFailMsg.style.display = "block";
+    faceInput.style.display = "block";
+}
+
+function showMessage(text, color) {
+    messageBox.textContent = text;
+    messageBox.style.color = color;
+}
+
+async function safeFetch(url, options) {
+    const res = await fetch(url, options);
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.indexOf("application/json") !== -1) {
+        return await res.json();
+    } else {
+        const text = await res.text();
+        throw new Error("Server did not return JSON:\n" + text);
+    }
+}
+
+// Verify Face
+document.getElementById("verifyFaceBtn").onclick = async () => {
+    let formData = new FormData();
+    if (video.style.display !== "none") {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext("2d").drawImage(video, 0, 0);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+        formData.append("face_image", blob, "verify.png");
+    } else if (faceInput.files.length) {
+        formData.append("face_image", faceInput.files[0]);
+    } else {
+        return showMessage("❌ Camera not available. Please upload an image.", "red");
+    }
+
+    try {
+        const result = await safeFetch("/verify-face/", { method: "POST", body: formData });
+        showMessage(result.ok ? `✅ Verified (confidence ${result.confidence})` : "❌ " + result.error, result.ok ? "green" : "red");
+    } catch (err) {
+        showMessage("❌ Request failed: " + err, "red");
+    }
+};
+
+// Verify Fingerprint
+document.getElementById("verifyFingerprintBtn").onclick = async () => {
+    if (!window.PublicKeyCredential) return showMessage("❌ WebAuthn not supported", "red");
+
+    try {
+        // Get challenge from server
+        const optionsResponse = await safeFetch("/fingerprint/start-verify/", { method: "GET" });
+        const options = optionsResponse.options;
+
+        // Convert base64 to Uint8Array
+        options.challenge = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0));
+        for (let cred of options.allowCredentials) {
+            cred.id = Uint8Array.from(atob(cred.id), c => c.charCodeAt(0));
+        }
+
+        const assertion = await navigator.credentials.get({ publicKey: options });
+
+        const formData = new FormData();
+        formData.append("assertion", JSON.stringify(assertion));
+
+        const result = await safeFetch("/fingerprint/complete-verify/", { method: "POST", body: formData });
+        showMessage(result.ok ? "✅ Fingerprint verified!" : "❌ " + result.error, result.ok ? "green" : "red");
+    } catch (err) {
+        showMessage("❌ Fingerprint verification failed: " + err, "red");
+    }
+};
+
+initCamera();
+
+function cameraFail() {
+    video.style.display = "none";
+    cameraFailMsg.classList.remove("d-none");
+    uploadWrapper.classList.remove("d-none");
+}
+</script>
+{% endblock %}

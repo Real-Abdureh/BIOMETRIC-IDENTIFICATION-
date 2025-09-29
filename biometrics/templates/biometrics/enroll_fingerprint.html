@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fingerprint Enrollment</title>
+</head>
+<body>
+    <h1>Enroll Fingerprint</h1>
+    <p>Challenge: {{ options.challenge }}</p>
+    <form method="POST">
+        {% csrf_token %}
+        <button type="submit">Enroll Fingerprint</button>
+    </form>
+</body>
+</html>
