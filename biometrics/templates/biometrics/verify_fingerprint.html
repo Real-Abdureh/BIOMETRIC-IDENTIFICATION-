@@ -1,0 +1,58 @@
+{% extends 'accounts/base.html' %}
+{% block content %}
+<div class="container mt-5">
+  <h2 class="text-center">Verify Fingerprint</h2>
+  <button id="verifyBtn" class="btn btn-success">Start Verification</button>
+  <pre id="status"></pre>
+</div>
+
+<script>
+  document.getElementById("verifyBtn").addEventListener("click", async () => {
+    try {
+      // ✅ Parse JSON passed from Django
+      const options = JSON.parse('{{ options|escapejs }}');
+
+      // Convert challenge from base64 to Uint8Array
+      options.challenge = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0));
+
+      // Convert credential IDs (if any) to Uint8Array
+      if (options.allow_credentials) {
+        options.allowCredentials = options.allow_credentials.map(c => ({
+          type: c.type,
+          id: Uint8Array.from(atob(c.id), ch => ch.charCodeAt(0))
+        }));
+        delete options.allow_credentials;
+      }
+
+      const assertion = await navigator.credentials.get({ publicKey: options });
+
+      const response = await fetch("{% url 'biometrics:complete_fingerprint_verify' %}", {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": "{{ csrf_token }}",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          id: assertion.id,
+          rawId: btoa(String.fromCharCode(...new Uint8Array(assertion.rawId))),
+          type: assertion.type,
+          response: {
+            clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(assertion.response.clientDataJSON))),
+            authenticatorData: btoa(String.fromCharCode(...new Uint8Array(assertion.response.authenticatorData))),
+            signature: btoa(String.fromCharCode(...new Uint8Array(assertion.response.signature))),
+            userHandle: assertion.response.userHandle 
+              ? btoa(String.fromCharCode(...new Uint8Array(assertion.response.userHandle)))
+              : null,
+          }
+        })
+      });
+
+      const result = await response.json();
+      document.getElementById("status").textContent = JSON.stringify(result, null, 2);
+
+    } catch (err) {
+      document.getElementById("status").textContent = "Error: " + err;
+    }
+  });
+</script>
+{% endblock %}

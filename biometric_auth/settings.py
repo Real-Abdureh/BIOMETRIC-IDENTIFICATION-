@@ -3,11 +3,12 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'replace-this-in-production'
 DEBUG = True
-ALLOWED_HOSTS = ["*","127.0.0.1", "localhost", "10.232.137.50"]
+ALLOWED_HOSTS = ["*","127.0.0.1", "localhost", "10.232.137.50", ".serveo.net", ]
 CSRF_TRUSTED_ORIGINS = [
     "https://*.ngrok-free.app",
     "https://*.ngrok-free.dev",
-    "https://*.loca.lt"
+    "https://*.loca.lt",
+    'https://*.serveo.net',
 ]
 
 

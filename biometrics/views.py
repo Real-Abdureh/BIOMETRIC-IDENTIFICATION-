@@ -4,6 +4,8 @@ from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from .models import FaceData, WebAuthnCredential
 from . import services
+import json
+from django.http import JsonResponse
 
 from webauthn.helpers.structs import (
     PublicKeyCredentialCreationOptions,
@@ -109,41 +111,77 @@ def verify_face(request):
 
 # ------------------- Fingerprint / WebAuthn Enrollment -------------------
 
+import base64
+import os
+import json
 
+def b64encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
+
+
+@login_required
 def start_fingerprint_enroll(request):
-    # Generate a new challenge
     challenge = services.generate_challenge()
+    if isinstance(challenge, str):   # ✅ ensure it's bytes
+        challenge = challenge.encode("utf-8")
 
-    # Build WebAuthn registration options
     options = PublicKeyCredentialCreationOptions(
         challenge=challenge,
         rp={"name": "MyApp"},
         user={
-            "id": str(request.user.id),
+            "id": str(request.user.id).encode("utf-8"),
             "name": request.user.username,
-            "display_name": request.user.get_full_name(),
+            "display_name": request.user.get_full_name() or request.user.username,
         },
-        pub_key_cred_params=[{"type": "public-key", "alg": -7}],  # -7 = ES256
+        pub_key_cred_params=[{"type": "public-key", "alg": -7}],
         authenticator_selection=AuthenticatorSelectionCriteria(
             user_verification="preferred"
         ),
         attestation=AttestationConveyancePreference.DIRECT,
     )
 
-    # Store challenge in session for verification later
-    request.session['registration_challenge'] = challenge
+    # Store challenge in session (as base64 string)
+    request.session['registration_challenge'] = base64.urlsafe_b64encode(challenge).decode()
 
-    return render(request, 'biometrics/enroll_fingerprint.html', {'options': options})
+    options_dict = {
+        "challenge": request.session['registration_challenge'],
+        "rp": {"name": "MyApp"},
+        "user": {
+            "id": base64.urlsafe_b64encode(str(request.user.id).encode()).decode(),
+            "name": request.user.username,
+            "displayName": request.user.get_full_name() or request.user.username,
+        },
+        "pubKeyCredParams": [{"type": "public-key", "alg": -7}],
+        "authenticatorSelection": {
+            "userVerification": "preferred"
+        },
+        "attestation": "direct",
+    }
+
+    return render(request, 'biometrics/enroll_fingerprint.html', {
+        "options": json.dumps(options_dict)
+    })
+
+
 
 @login_required
 def complete_fingerprint_enroll(request):
-    data = request.POST.dict()
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"ok": False, "error": "Invalid JSON"})
+
     challenge = request.session.pop('registration_challenge', None)
     if not challenge:
         return JsonResponse({"ok": False, "error": "No challenge found"})
 
+    challenge_bytes = base64.urlsafe_b64decode(challenge.encode())
+
     try:
-        verified = services.verify_registration_response(data, expected_challenge=challenge)
+        verified = services.verify_registration_response(
+            data,
+            expected_challenge=challenge_bytes
+        )
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)})
 
@@ -163,28 +201,48 @@ def complete_fingerprint_enroll(request):
 
 @login_required
 def start_fingerprint_verify(request):
+    import base64
     credentials = WebAuthnCredential.objects.filter(user=request.user)
-    options = PublicKeyCredentialRequestOptions(
-        challenge=services.generate_challenge(),
-        allow_credentials=[{"id": c.credential_id, "type": "public-key"} for c in credentials],
-        user_verification="preferred",
-    )
-    request.session['auth_challenge'] = options.challenge
-    return render(request, 'verify_fingerprint.html', {'options': options})
+    challenge = services.generate_challenge()
+    challenge_b64 = base64.urlsafe_b64encode(challenge).decode()
+
+    request.session['auth_challenge'] = challenge_b64
+
+    options_dict = {
+        "challenge": challenge_b64,
+        "allowCredentials": [
+            {
+                "id": base64.urlsafe_b64encode(c.credential_id).decode(),
+                "type": "public-key"
+            } for c in credentials
+        ],
+        "userVerification": "preferred",
+    }
+
+    return render(request, 'biometrics/verify_fingerprint.html', {
+        "options": json.dumps(options_dict)
+    })
+
 
 
 @login_required
 def complete_fingerprint_verify(request):
-    data = request.POST.dict()
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"ok": False, "error": "Invalid JSON"})
+
     challenge = request.session.pop('auth_challenge', None)
     if not challenge:
         return JsonResponse({"ok": False, "error": "No challenge found"})
 
+    challenge_bytes = base64.urlsafe_b64decode(challenge.encode())
     credentials = WebAuthnCredential.objects.filter(user=request.user)
+
     try:
         verified = services.verify_authentication_response(
             data,
-            expected_challenge=challenge,
+            expected_challenge=challenge_bytes,
             credential_public_keys={c.credential_id: c.public_key for c in credentials},
             sign_count_storage={c.credential_id: c.sign_count for c in credentials},
         )
@@ -198,9 +256,6 @@ def complete_fingerprint_verify(request):
         return JsonResponse({"ok": True, "message": "Fingerprint verified!"})
 
     return JsonResponse({"ok": False, "error": "Verification failed"})
-
-
-
 
 
 

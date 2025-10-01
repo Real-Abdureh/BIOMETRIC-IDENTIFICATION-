@@ -1,15 +1,45 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Fingerprint Enrollment</title>
-</head>
-<body>
-    <h1>Enroll Fingerprint</h1>
-    <p>Challenge: {{ options.challenge }}</p>
-    <form method="POST">
-        {% csrf_token %}
-        <button type="submit">Enroll Fingerprint</button>
-    </form>
-</body>
-</html>
+{% extends 'accounts/base.html' %}
+{% block content %}
+<div class="container mt-5">
+  <h2 class="text-center">Enroll Fingerprint</h2>
+  <button id="enrollBtn" class="btn btn-primary">Start Enrollment</button>
+  <pre id="status"></pre>
+</div>
+
+<script>
+  document.getElementById("enrollBtn").addEventListener("click", async () => {
+    try {
+      const options = JSON.parse('{{ options|escapejs }}');
+
+      // Decode base64 fields
+      options.challenge = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0));
+      options.user.id = Uint8Array.from(atob(options.user.id), c => c.charCodeAt(0));
+
+      const cred = await navigator.credentials.create({ publicKey: options });
+
+      const response = await fetch("{% url 'biometrics:complete_fingerprint_enroll' %}", {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": "{{ csrf_token }}",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          id: cred.id,
+          rawId: btoa(String.fromCharCode(...new Uint8Array(cred.rawId))),
+          type: cred.type,
+          response: {
+            clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(cred.response.clientDataJSON))),
+            attestationObject: btoa(String.fromCharCode(...new Uint8Array(cred.response.attestationObject))),
+          }
+        })
+      });
+
+      const result = await response.json();
+      document.getElementById("status").textContent = JSON.stringify(result, null, 2);
+
+    } catch (err) {
+      document.getElementById("status").textContent = "Error: " + err;
+    }
+  });
+</script>
+{% endblock %}
