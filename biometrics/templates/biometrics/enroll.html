@@ -5,6 +5,40 @@
     <div class="card-body p-4">
       <h2 class="mb-4 text-center text-primary fw-bold">Enroll Face / Fingerprint</h2>
 
+      <!-- Personal Info Form -->
+      <form id="enrollForm" class="mb-4">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Fullname</label>
+            <input type="text" name="fullname" class="form-control" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Registration Number</label>
+            <input type="text" name="registration_number" class="form-control" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Department</label>
+            <input type="text" name="department" class="form-control" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Level</label>
+            <input type="text" name="level" class="form-control" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">State of Origin</label>
+            <input type="text" name="state_of_origin" class="form-control" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Email</label>
+            <input type="email" name="email" class="form-control" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Phone Number</label>
+            <input type="text" name="phone_number" class="form-control" required>
+          </div>
+        </div>
+      </form>
+
       <!-- Face Enrollment -->
       <div class="mb-4">
         <label class="form-label fw-semibold">Face Enrollment</label>
@@ -40,16 +74,13 @@
   </div>
 </div>
 
-
-
-
-
 <script>
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const messageBox = document.getElementById("messageBox");
 const cameraFailMsg = document.getElementById("cameraFailMsg");
 const faceInput = document.getElementById("faceInput");
+const enrollForm = document.getElementById("enrollForm");
 
 // Camera setup
 async function initCamera() {
@@ -67,7 +98,6 @@ async function initCamera() {
         console.warn("Camera init failed:", err);
     }
 }
-
 function cameraFail() {
     video.style.display = "none";
     cameraFailMsg.style.display = "block";
@@ -91,11 +121,20 @@ async function safeFetch(url, options) {
     }
 }
 
+// Append personal info to FormData
+function appendFormData(formData) {
+    const inputs = enrollForm.querySelectorAll("input");
+    inputs.forEach(input => {
+        formData.append(input.name, input.value);
+    });
+}
+
 // Face Upload
 document.getElementById("uploadBtn").onclick = async () => {
     if (!faceInput.files.length) return showMessage("❌ Please select an image", "red");
     const formData = new FormData();
     formData.append("face_image", faceInput.files[0]);
+    appendFormData(formData);
     try {
         const result = await safeFetch("", {
             method: "POST",
@@ -117,6 +156,7 @@ document.getElementById("snap").onclick = async () => {
     const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
     const formData = new FormData();
     formData.append("face_image", blob, "capture.png");
+    appendFormData(formData);
     try {
         const result = await safeFetch("", {
             method: "POST",
@@ -134,23 +174,15 @@ document.getElementById("fingerprintEnrollBtn").onclick = async () => {
     if (!window.PublicKeyCredential) {
         return showMessage("❌ WebAuthn not supported on this device", "red");
     }
-
     try {
-        // Request challenge from server
         const optionsResponse = await safeFetch("/fingerprint/start-enroll/", { method: "GET" });
         const options = optionsResponse.options;
-
-        // Convert options from base64 if needed
         options.challenge = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0));
         options.user.id = Uint8Array.from(atob(options.user.id), c => c.charCodeAt(0));
-
         const credential = await navigator.credentials.create({ publicKey: options });
-
-        // Send credential to server to complete enrollment
         const formData = new FormData();
         formData.append("credential", JSON.stringify(credential));
         const result = await safeFetch("/fingerprint/complete-enroll/", { method: "POST", body: formData });
-
         showMessage(result.ok ? "✅ Fingerprint enrolled!" : "❌ " + result.error, result.ok ? "green" : "red");
     } catch (err) {
         showMessage("❌ Fingerprint enrollment failed: " + err, "red");

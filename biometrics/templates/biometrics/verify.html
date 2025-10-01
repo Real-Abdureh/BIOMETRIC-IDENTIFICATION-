@@ -8,26 +8,13 @@
       <!-- Face Verification -->
       <div class="mb-4 text-center">
         <div class="d-flex flex-column align-items-center">
-          <!-- Video Preview -->
           <video id="video" autoplay class="border rounded shadow-sm mb-3" width="320" height="240"></video>
-
-          <!-- Camera Fail Message -->
           <p id="cameraFailMsg" class="text-danger fw-semibold d-none">
             ❌ Camera not available. Please upload an image instead.
           </p>
-
-          <!-- Canvas (hidden) -->
           <canvas id="canvas" class="d-none"></canvas>
-
-          <!-- Upload Fallback -->
           <div id="uploadWrapper" class="w-75 mt-2 d-none">
-            <input 
-              type="file" 
-              id="faceInput" 
-              accept="image/*" 
-              capture="user" 
-              class="form-control"
-            />
+            <input type="file" id="faceInput" accept="image/*" capture="user" class="form-control"/>
           </div>
         </div>
       </div>
@@ -41,6 +28,20 @@
 
       <!-- Message Box -->
       <div id="messageBox" class="mt-4 text-center fw-bold"></div>
+
+      <!-- User Info (hidden initially) -->
+      <div id="userInfo" class="mt-4 d-none">
+        <h4 class="text-center text-success">✅ Personal Information</h4>
+        <ul class="list-group">
+          <li class="list-group-item"><strong>Fullname:</strong> <span id="fullname"></span></li>
+          <li class="list-group-item"><strong>Registration Number:</strong> <span id="regno"></span></li>
+          <li class="list-group-item"><strong>Department:</strong> <span id="dept"></span></li>
+          <li class="list-group-item"><strong>Level:</strong> <span id="level"></span></li>
+          <li class="list-group-item"><strong>State of Origin:</strong> <span id="state"></span></li>
+          <li class="list-group-item"><strong>Email:</strong> <span id="email"></span></li>
+          <li class="list-group-item"><strong>Phone Number:</strong> <span id="phone"></span></li>
+        </ul>
+      </div>
     </div>
   </div>
 </div>
@@ -52,6 +53,7 @@ const messageBox = document.getElementById("messageBox");
 const cameraFailMsg = document.getElementById("cameraFailMsg");
 const faceInput = document.getElementById("faceInput");
 const uploadWrapper = document.getElementById("uploadWrapper");
+const userInfo = document.getElementById("userInfo");
 
 // Camera setup
 async function initCamera() {
@@ -59,7 +61,6 @@ async function initCamera() {
         cameraFail();
         return;
     }
-
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         video.srcObject = stream;
@@ -71,20 +72,15 @@ async function initCamera() {
         console.warn("Camera init failed:", err);
     }
 }
-
 function cameraFail() {
     video.style.display = "none";
     cameraFailMsg.classList.remove("d-none");
     uploadWrapper.classList.remove("d-none");
 }
-
-// Show messages
 function showMessage(text, color) {
     messageBox.textContent = text;
     messageBox.style.color = color;
 }
-
-// Safe fetch
 async function safeFetch(url, options) {
     const res = await fetch(url, options);
     const contentType = res.headers.get("content-type");
@@ -96,42 +92,45 @@ async function safeFetch(url, options) {
     }
 }
 
-// Verify button
+// Verify
 document.getElementById("verifyBtn").onclick = async () => {
     let formData = new FormData();
-
     if (video.style.display !== "none") {
-        // Use video frame
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         canvas.getContext("2d").drawImage(video, 0, 0);
         const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
         formData.append("face_image", blob, "verify.png");
     } else if (faceInput.files.length) {
-        // Use uploaded file
         formData.append("face_image", faceInput.files[0]);
     } else {
         return showMessage("❌ Camera not available. Please upload an image.", "red");
     }
-
     try {
         const result = await safeFetch("", {
             method: "POST",
             headers: { "X-CSRFToken": "{{ csrf_token }}" },
             body: formData
         });
-
         if (result.ok) {
             showMessage(`✅ Verified (confidence ${result.confidence})`, "green");
+            // Fill in personal data
+            document.getElementById("fullname").textContent = result.data.fullname;
+            document.getElementById("regno").textContent = result.data.registration_number;
+            document.getElementById("dept").textContent = result.data.department;
+            document.getElementById("level").textContent = result.data.level;
+            document.getElementById("state").textContent = result.data.state_of_origin;
+            document.getElementById("email").textContent = result.data.email;
+            document.getElementById("phone").textContent = result.data.phone_number;
+            userInfo.classList.remove("d-none");
         } else {
             showMessage("❌ " + result.error, "red");
+            userInfo.classList.add("d-none");
         }
     } catch (err) {
         showMessage("❌ Request failed: " + err, "red");
     }
 };
-
-// Initialize
 initCamera();
 </script>
 {% endblock %}

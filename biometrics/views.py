@@ -22,6 +22,17 @@ def enroll_face(request):
         img = request.FILES.get("face_image")
         if not img:
             return JsonResponse({"ok": False, "error": "No image uploaded"})
+
+        # collect extra data
+        fullname = request.POST.get("fullname")
+        reg_no = request.POST.get("registration_number")
+        dept = request.POST.get("department")
+        level = request.POST.get("level")
+        state = request.POST.get("state_of_origin")
+        email = request.POST.get("email")
+        phone = request.POST.get("phone_number")
+
+        # detect face
         try:
             res = services.detect_face_from_file(img)
         except Exception as e:
@@ -31,10 +42,24 @@ def enroll_face(request):
             return JsonResponse({"ok": False, "error": "No face detected"})
 
         token = res["faces"][0]["face_token"]
-        FaceData.objects.update_or_create(user=request.user, defaults={"face_token": token})
-        return JsonResponse({"ok": True, "message": "Face enrolled!"})
+
+        FaceData.objects.update_or_create(
+            user=request.user,
+            defaults={
+                "face_token": token,
+                "fullname": fullname,
+                "registration_number": reg_no,
+                "department": dept,
+                "level": level,
+                "state_of_origin": state,
+                "email": email,
+                "phone_number": phone,
+            },
+        )
+        return JsonResponse({"ok": True, "message": "Face enrolled with personal data!"})
 
     return render(request, "biometrics/enroll.html")
+
 
 
 @login_required
@@ -43,6 +68,7 @@ def verify_face(request):
         img = request.FILES.get("face_image")
         if not img:
             return JsonResponse({"ok": False, "error": "No image uploaded"})
+
         try:
             res = services.detect_face_from_file(img)
         except Exception as e:
@@ -61,9 +87,24 @@ def verify_face(request):
         cmp = services.compare_face_tokens(saved.face_token, live_token)
         confidence = cmp.get("confidence", 0)
         ok = confidence > 70
-        return JsonResponse({"ok": ok, "confidence": confidence})
+
+        if ok:
+            # show personal data only if verification succeeds
+            data = {
+                "fullname": saved.fullname,
+                "registration_number": saved.registration_number,
+                "department": saved.department,
+                "level": saved.level,
+                "state_of_origin": saved.state_of_origin,
+                "email": saved.email,
+                "phone_number": saved.phone_number,
+            }
+            return JsonResponse({"ok": True, "confidence": confidence, "data": data})
+
+        return JsonResponse({"ok": False, "confidence": confidence})
 
     return render(request, "biometrics/verify.html")
+
 
 
 # ------------------- Fingerprint / WebAuthn Enrollment -------------------
